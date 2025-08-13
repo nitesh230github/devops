@@ -19,7 +19,7 @@ jobs:
       with: 
         terraform_version: 1.12.2
 
-    - name: Terraform Init and Plan
+    - name: Terraform Init and PlanN
       run: |
         terraform init
         terraform plan
