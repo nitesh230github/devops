@@ -1,0 +1,20 @@
+name : terraform-deployment
+on : push
+jobs : 
+   deploy : 
+     env :
+      AWS_ACCESS_KEYS : "${{secret.AWS_ACCESS_KEYS}}"
+      AWS_SECRET_ACCESS_KEYS : "${{secret.AWS_SECRET_ACCESS_KEYS}}"
+     runs-on : ubuntu-latest
+     steps: 
+     - name : Code_checkout
+       uses : action/chekaout@v4
+     - name  : setup terraform
+       uses  : hashicorp/setup-terraform@v3
+       with : 
+          terraform_version: 1.12.1
+     - name : terraform init
+       run  : teraform init
+              terraform plan
+     - name : terraform apply
+       run  : teraform apply --auto-approve
