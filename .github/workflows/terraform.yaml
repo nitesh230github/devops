@@ -27,7 +27,6 @@ jobs:
     - name: Terraform Init and PlanN
       run: |
         terraform init
-        terraform plan
 
     - name: Terraform Action
       run: terraform ${{ github.event.inputs.action }} --auto-approve
