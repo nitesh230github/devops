@@ -1,7 +1,12 @@
 name: terraform-deployment
 
 on: 
-  push:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform action (apply or destroy)'
+        required: true
+        default: 'apply'
 
 jobs: 
   deploy: 
@@ -24,6 +29,6 @@ jobs:
         terraform init
         terraform plan
 
-    - name: Terraform Apply
-      run: terraform apply --auto-approve
+    - name: Terraform Action
+      run: terraform ${{ github.event.inputs.action }} --auto-approve
 
