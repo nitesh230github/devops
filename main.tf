@@ -1,3 +1,4 @@
+# create security group for ssh
 provider "aws" {
   region = "us-east-1"
 }
