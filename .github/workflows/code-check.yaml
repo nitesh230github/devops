@@ -43,7 +43,11 @@ jobs:
     - name: Terraform Format Check (sirf push me chalega)
       if: github.event_name == 'push'
       run: | 
-        terraform fmt -check
+        echo "Checking files in directory:"
+        ls -la *.tf                                     # list all .tf files in the directory
+        terraform fmt -check -list=true -diff
         terraform init 
         terraform validate
       
+# -list=true -diff lagane se agar kisi file mein formatting ki galti hogi,
+# toh logs mein exact line-by-line diff (kya galat hai aur kya hona chahiye) bhi dikh jayega!
