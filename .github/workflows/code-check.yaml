@@ -32,7 +32,7 @@ jobs:
         terraform_version: 1.12.2
 
     - name: Terraform Action (sirf mannual run me hi chalega)
-      if : github.event_name == 'workflow_dispatch'  
+      if: github.event_name == 'workflow_dispatch'  
       run: |
         if [ "${{ github.event.inputs.action }}" = "validate" ]; then
           terraform init 
@@ -41,7 +41,7 @@ jobs:
         
 
     - name: Terraform Format Check (sirf push me chalega)
-      if : github.event_name == 'push'
+      if: github.event_name == 'push'
       run: | 
         terraform fmt -check
         terraform init 
