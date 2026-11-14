@@ -45,7 +45,7 @@ jobs:
       run: | 
         echo "Checking files in directory:"
         ls -la *.tf                                     # list all .tf files in the directory
-        terraform fmt -check -list=true -diff
+        terraform fmt -check -list=true 
         terraform init 
         terraform validate
       
