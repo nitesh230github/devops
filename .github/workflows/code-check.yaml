@@ -1,0 +1,46 @@
+name : terraform code & format check
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform action (fmt or validate)'
+        required: true
+        default: 'fmt' 
+
+  push:
+    branches:
+      - main
+    paths:
+      - 'devops/**'     
+
+jobs:
+  terraform-check:    
+  
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Code checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.12.2
+
+    - name: Terraform Action (sirf mannual run me hi chalega)
+      if : github.event_name == 'workflow_dispatch'  
+      run: |
+        if [ "${{ github.event.inputs.action }}" = "validate" ]; then
+          terraform init 
+        fi
+         terraform github.event.inputs.action 
+        
+
+    - name: Terraform Format Check (sirf push me chalega)
+      if : github.event_name == 'push'
+      run: | 
+        terraform fmt -check
+        terraform init 
+        terraform validate
+      
