@@ -15,7 +15,7 @@ on:
     branches:
       - main
     paths:
-      - 'devops/**'     
+      - 'module/**'     
 
 jobs:
   terraform-check:    
