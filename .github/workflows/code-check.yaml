@@ -4,9 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'Terraform action (fmt or validate)'
-        required: true
-        default: 'fmt' 
+        description: 'Terraform action (fmt -check or validate)'
+        type: choice
+        default: 'fmt -check'
+        options:
+          - 'fmt -check'
+          - 'validate' 
 
   push:
     branches:
