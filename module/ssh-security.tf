@@ -9,7 +9,7 @@ resource "aws_security_group" "allow_ssh" {
   description = "Allow SSH inbound traffic"
 
   ingress {
-    description = "SSH from anywhere"
+    description = "SSH from anywhere in world"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
