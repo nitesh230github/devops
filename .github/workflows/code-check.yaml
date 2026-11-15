@@ -45,6 +45,7 @@ jobs:
       run: | 
           echo "=== All .tf files in repository ==="
           find . -name "*.tf"
+          ls ./module
           echo "=== Checking formatting ==="
           terraform fmt -check -recursive -diff
           terraform init -backend=false
