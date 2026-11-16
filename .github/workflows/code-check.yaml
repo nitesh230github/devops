@@ -38,6 +38,13 @@ jobs:
         if [ "${{ github.event.inputs.action }}" = "validate" ]; then
           terraform init 
         fi
+        echo "=== checked files ==="
+        STATUS=0
+        for file in $(find . -name "*.tf" -not -path "./.terraform/*"); do
+          echo "Checking: $file"
+          terraform fmt -check -diff "$file" || STATUS=1
+        done
+        exit $STATUS
         terraform ${{ github.event.inputs.action }} 
         
 
