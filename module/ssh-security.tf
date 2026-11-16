@@ -1,4 +1,4 @@
-# create security group for ssh and 
+# create security group for ssh
 provider "aws" {
   region = "us-east-1"
 }
@@ -9,12 +9,13 @@ resource "aws_security_group" "allow_ssh" {
   description = "Allow SSH inbound traffic"
 
   ingress {
-    description = "SSH from anywhere in world"
+    description = "SSH from anywhere"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -22,6 +23,7 @@ resource "aws_security_group" "allow_ssh" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
+
 # Create EC2 Instance
 resource "aws_instance" "my_ec2" {
   ami           = "ami-0de716d6197524dd9" # Amazon Linux 2 in us-east-1
@@ -33,4 +35,3 @@ resource "aws_instance" "my_ec2" {
     Name = "MyTerraformEC2"
   }
 }
-
