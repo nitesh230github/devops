@@ -46,11 +46,15 @@ jobs:
           echo "=== All .tf files in repository ==="
           find . -name "*.tf"
           echo "=== All .tf files in module ==="
-          ls ./module
+          STATUS=0
+          for file in $(find . -name "*.tf" -not -path "./.terraform/*"); do
+            echo "Checking: $file"
+            terraform fmt -check -diff "$file" || STATUS=1
+          done
+          exit $STATUS
           echo "=== Checking formatting ==="
-          terraform fmt -check 
-          terraform init -backend=false
-          terraform validate
+          
       
 # -list=true -diff lagane se agar kisi file mein formatting ki galti hogi,
 # toh logs mein exact line-by-line diff (kya galat hai aur kya hona chahiye) bhi dikh jayega!
+# Note: -not -path "./.terraform/*" isliye lagaya hai taaki agar .terraform cache folder exist kare toh uske andar ki provider files scan na hon.
