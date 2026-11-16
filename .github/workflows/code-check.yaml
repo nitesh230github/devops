@@ -45,7 +45,7 @@ jobs:
       run: | 
           echo "=== All .tf files in repository ==="
           find . -name "*.tf"
-          echo "=== All .tf files in module ==="
+          echo "=== checked files ==="
           STATUS=0
           for file in $(find . -name "*.tf" -not -path "./.terraform/*"); do
             echo "Checking: $file"
