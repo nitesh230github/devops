@@ -60,7 +60,7 @@ jobs:
             terraform fmt -check -diff "$file" || STATUS=1
           done
           exit $STATUS
-          echo "=== Checking formatting ==="
+          
           
       
 # -list=true -diff lagane se agar kisi file mein formatting ki galti hogi,
