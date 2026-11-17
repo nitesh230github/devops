@@ -1,6 +1,7 @@
 name: Terraform PR Plan & Cost Preview
 
 on:
+  workflow_dispatch:
   pull_request:
     branches:
       - main
