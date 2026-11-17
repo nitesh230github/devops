@@ -19,7 +19,7 @@ jobs:
   # JOB 1: Level 1 Reusable Workflow (Format & Validate)
   # ==========================================
   call-format-validate:
-    uses: ./.github/workflows/terraform-check.yaml
+    uses: ./.github/workflows/code-check.yaml
 
   # ==========================================
   # JOB 2: AWS Login + Plan + PR Comment + Infracost
