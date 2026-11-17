@@ -10,6 +10,6 @@ resource "aws_instance" "my_ec2" {
 #security_groups = [aws_security_group.allow_ssh.name]
 
   tags = {
-    Name = "MyTerraformEC2"
+    Name = "MyTerraformnewEC2"
   }
 }
