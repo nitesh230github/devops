@@ -1,0 +1,84 @@
+name: Terraform PR Plan & Cost Preview
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '**.tf'
+
+permissions:
+  id-token: write        # AWS OIDC Login ke liye
+  contents: read         # Code checkout ke liye
+  pull-requests: write   # PR par Plan aur Infracost comment post karne ke liye
+
+jobs:
+  # ==========================================
+  # JOB 1: Level 1 Reusable Workflow (Format & Validate)
+  # ==========================================
+  call-format-validate:
+    uses: ./.github/workflows/terraform-check.yaml
+
+  # ==========================================
+  # JOB 2: AWS Login + Plan + PR Comment + Infracost
+  # ==========================================
+  terraform-plan:
+    needs: call-format-validate   # Job 1 pass hone ke baad hi chalega
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Code Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.12.2
+          terraform_wrapper: false
+
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::<APNA_AWS_ACCOUNT_ID>:role/GitHubActions-Terraform-Role
+          aws-region: ap-south-1
+
+      - name: Terraform Init (Remote S3 + DynamoDB)
+        run: terraform init
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan -no-color -out=tfplan.binary > plan.txt
+          terraform show -json tfplan.binary > plan.json
+          cat plan.txt
+
+      - name: Comment Plan on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('plan.txt', 'utf8');
+            const body = `### Terraform Plan Output 📋\n\`\`\`hcl\n${plan.slice(0, 60000)}\n\`\`\``;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+      - name: Setup Infracost
+        uses: infracost/actions/setup@v3
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Generate Infracost Diff & Post PR Comment
+        run: |
+          infracost breakdown --path=plan.json \
+            --format=json \
+            --out-file=/tmp/infracost.json
+
+          infracost comment github --path=/tmp/infracost.json \
+            --repo=$GITHUB_REPOSITORY \
+            --pull-request=${{ github.event.pull_request.number }} \
+            --github-token=${{ secrets.GITHUB_TOKEN }} \
+            --behavior=update
