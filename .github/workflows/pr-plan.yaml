@@ -41,8 +41,8 @@ jobs:
       - name: Configure AWS Credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::<APNA_AWS_ACCOUNT_ID>:role/GitHubActions-Terraform-Role
-          aws-region: ap-south-1
+          role-to-assume: ${{ secrets.AWS_IAM_ARN_DEVOPS }}
+          aws-region: us-east-1
 
       - name: Terraform Init (Remote S3 + DynamoDB)
         run: terraform init
