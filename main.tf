@@ -1,4 +1,4 @@
-# Create Security Group
+# Create Security Group for aws ec2
 resource "aws_security_group" "allow_ssh" {
   name        = "allow_ssh"
   description = "Allow SSH inbound traffic"
