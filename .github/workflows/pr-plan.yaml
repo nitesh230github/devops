@@ -92,7 +92,6 @@ jobs:
             PAY=$2
             MONTHS=$3
 
-            # Column 0 se clean YAML likhein (no leading spaces)
             printf "version: 0.1\nresource_usage:\n" > /tmp/usage.yml
 
             for inst in $EC2_LIST; do
@@ -106,25 +105,16 @@ jobs:
               printf "  %s:\n" "$db" >> /tmp/usage.yml
               if [ "$TERM" != "on_demand" ]; then
                 RDS_PAY=$PAY
-                if [ "$TERM" = "3_yr" ] && [ "$PAY" = "no_upfront" ]; then
+                if [ "$TERM" = "3_year" ] && [ "$PAY" = "no_upfront" ]; then
                   RDS_PAY="partial_upfront"
                 fi
-                printf "    reserved_instance_multi_az: false\n    reserved_instance_term: %s\n    reserved_instance_payment_option: %s\n" "$TERM" "$RDS_PAY" >> /tmp/usage.yml
+                printf "    reserved_instance_term: %s\n    reserved_instance_payment_option: %s\n" "$TERM" "$RDS_PAY" >> /tmp/usage.yml
               fi
             done
 
             infracost breakdown --path=plan.json --usage-file=/tmp/usage.yml --format=json --out-file=/tmp/ic_out.json >/dev/null
 
-            # Debug: Ek baar generated usage.yml aur JSON values logs me print karein
-            if [ "$TERM" = "3_yr" ] && [ "$PAY" = "all_upfront" ]; then
-              echo "=== Sample /tmp/usage.yml ==="
-              cat /tmp/usage.yml
-            fi
-
-            # Monthly recurring cost
             MO=$(jq -r '(.totalMonthlyCost // "0") | tonumber' /tmp/ic_out.json)
-
-            # Upfront one-time fee (jahan monthlyCost null hai aur price मौजूद hai)
             UPFRONT=$(jq -r '[.. | objects | select(has("monthlyCost") and .monthlyCost == null and .price != null) | (.price | tonumber)] | add // 0' /tmp/ic_out.json)
 
             awk "BEGIN {printf \"%.2f\", ($MO * $MONTHS) + $UPFRONT}"
@@ -135,22 +125,22 @@ jobs:
           OD_MO=$(awk "BEGIN {printf \"%.2f\", $OD_1Y / 12}")
           OD_3Y=$(awk "BEGIN {printf \"%.2f\", $OD_MO * 36}")
 
-          # 2. No Upfront
-          NU_1Y_TOT=$(calc_term_total "1_yr" "no_upfront" 12)
+          # 2. No Upfront (1_year & 3_year)
+          NU_1Y_TOT=$(calc_term_total "1_year" "no_upfront" 12)
           NU_1Y_MO=$(awk "BEGIN {printf \"%.2f\", $NU_1Y_TOT / 12}")
-          NU_3Y_TOT=$(calc_term_total "3_yr" "no_upfront" 36)
+          NU_3Y_TOT=$(calc_term_total "3_year" "no_upfront" 36)
           NU_3Y_MO=$(awk "BEGIN {printf \"%.2f\", $NU_3Y_TOT / 36}")
 
-          # 3. Partial Upfront
-          PU_1Y_TOT=$(calc_term_total "1_yr" "partial_upfront" 12)
+          # 3. Partial Upfront (1_year & 3_year)
+          PU_1Y_TOT=$(calc_term_total "1_year" "partial_upfront" 12)
           PU_1Y_MO=$(awk "BEGIN {printf \"%.2f\", $PU_1Y_TOT / 12}")
-          PU_3Y_TOT=$(calc_term_total "3_yr" "partial_upfront" 36)
+          PU_3Y_TOT=$(calc_term_total "3_year" "partial_upfront" 36)
           PU_3Y_MO=$(awk "BEGIN {printf \"%.2f\", $PU_3Y_TOT / 36}")
 
-          # 4. All Upfront
-          AU_1Y_TOT=$(calc_term_total "1_yr" "all_upfront" 12)
+          # 4. All Upfront (1_year & 3_year)
+          AU_1Y_TOT=$(calc_term_total "1_year" "all_upfront" 12)
           AU_1Y_MO=$(awk "BEGIN {printf \"%.2f\", $AU_1Y_TOT / 12}")
-          AU_3Y_TOT=$(calc_term_total "3_yr" "all_upfront" 36)
+          AU_3Y_TOT=$(calc_term_total "3_year" "all_upfront" 36)
           AU_3Y_MO=$(awk "BEGIN {printf \"%.2f\", $AU_3Y_TOT / 36}")
 
           pct() {
