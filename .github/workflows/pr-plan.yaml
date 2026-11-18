@@ -84,16 +84,20 @@ jobs:
 
       - name: Generate Complete FinOps Matrix & Resource Breakdown
         run: |
-          # 1. Plan JSON se saare EC2 aur RDS instances automatically detect karein
           EC2_LIST=$(jq -r '[.. | objects | select(.type? == "aws_instance") | .address] | unique[]' plan.json)
           RDS_LIST=$(jq -r '[.. | objects | select(.type? == "aws_db_instance") | .address] | unique[]' plan.json)
 
-          # Helper function: Term aur Payment option ke hisab se total monthly cost nikalne ke liye
-          calc_cost() {
+          # Helper function: Term (1_yr/3_yr) aur Payment (no_upfront/partial_upfront/all_upfront) ke hisab se
+          # Asli Total Term Cost = UpfrontCost + (MonthlyCost * Months) return karega
+          calc_term_total() {
             TERM=$1
             PAY=$2
-            echo "version: 0.1" > /tmp/usage.yml
-            echo "resource_usage:" >> /tmp/usage.yml
+            MONTHS=$3
+
+            cat <<YAML > /tmp/usage.yml
+          version: 0.1
+          resource_usage:
+          YAML
 
             for inst in $EC2_LIST; do
               echo "  $inst:" >> /tmp/usage.yml
@@ -108,83 +112,94 @@ jobs:
             for db in $RDS_LIST; do
               echo "  $db:" >> /tmp/usage.yml
               if [ "$TERM" != "on_demand" ]; then
+                # AWS RDS 3-Year me no_upfront nahi deta, isliye 3_yr no_upfront ke liye partial_upfront fallback
+                RDS_PAY=$PAY
+                if [ "$TERM" == "3_yr" ] && [ "$PAY" == "no_upfront" ]; then
+                  RDS_PAY="partial_upfront"
+                fi
                 echo "    reserved_instance_term: $TERM" >> /tmp/usage.yml
-                echo "    reserved_instance_payment_option: $PAY" >> /tmp/usage.yml
+                echo "    reserved_instance_payment_option: $RDS_PAY" >> /tmp/usage.yml
               fi
             done
 
             infracost breakdown --path=plan.json --usage-file=/tmp/usage.yml --format=json --out-file=/tmp/ic_out.json >/dev/null
-            jq -r '.totalMonthlyCost | tonumber' /tmp/ic_out.json
+
+            # Monthly recurring cost + Upfront cost dono nikalein
+            MO=$(jq -r '(.totalMonthlyCost // "0") | tonumber' /tmp/ic_out.json)
+            UPFRONT=$(jq -r '[.projects[].breakdown.resources[].costComponents[]? | select(.unit == "onetime" or (.name | test("upfront"; "i"))) | (.monthlyCost // .price // "0") | tonumber] | add // 0' /tmp/ic_out.json)
+
+            # Infracost v0.10+ me upfront cost projects[].breakdown.totalUpfrontCost ya subresources me hoti hai:
+            # Direct JSON check:
+            UPFRONT_ALT=$(jq -r '([.. | objects | select(.monthlyCost? == null and .price? != null and (.unit? == "Quantity" or .unit? == "onetime")) | (.price | tonumber)] | add) // 0' /tmp/ic_out.json)
+
+            awk "BEGIN {printf \"%.2f\", ($MO * $MONTHS) + $UPFRONT + $UPFRONT_ALT}"
           }
 
-          # 2. On-Demand Baseline Cost (All Resources)
-          OD_MO=$(calc_cost "on_demand" "none")
-          OD_1Y=$(awk "BEGIN {printf \"%.2f\", $OD_MO * 12}")
+          # 1. On-Demand Baseline
+          OD_1Y=$(calc_term_total "on_demand" "none" 12)
+          OD_MO=$(awk "BEGIN {printf \"%.2f\", $OD_1Y / 12}")
           OD_3Y=$(awk "BEGIN {printf \"%.2f\", $OD_MO * 36}")
 
-          # 3. No Upfront (1-Yr & 3-Yr)
-          NU_1Y_MO=$(calc_cost "1_yr" "no_upfront")
-          NU_1Y_TOT=$(awk "BEGIN {printf \"%.2f\", $NU_1Y_MO * 12}")
-          NU_3Y_MO=$(calc_cost "3_yr" "no_upfront")
-          NU_3Y_TOT=$(awk "BEGIN {printf \"%.2f\", $NU_3Y_MO * 36}")
+          # 2. No Upfront
+          NU_1Y_TOT=$(calc_term_total "1_yr" "no_upfront" 12)
+          NU_1Y_MO=$(awk "BEGIN {printf \"%.2f\", $NU_1Y_TOT / 12}")
+          NU_3Y_TOT=$(calc_term_total "3_yr" "no_upfront" 36)
+          NU_3Y_MO=$(awk "BEGIN {printf \"%.2f\", $NU_3Y_TOT / 36}")
 
-          # 4. Partial Upfront (1-Yr & 3-Yr)
-          PU_1Y_MO=$(calc_cost "1_yr" "partial_upfront")
-          PU_1Y_TOT=$(awk "BEGIN {printf \"%.2f\", $PU_1Y_MO * 12}")
-          PU_3Y_MO=$(calc_cost "3_yr" "partial_upfront")
-          PU_3Y_TOT=$(awk "BEGIN {printf \"%.2f\", $PU_3Y_MO * 36}")
+          # 3. Partial Upfront
+          PU_1Y_TOT=$(calc_term_total "1_yr" "partial_upfront" 12)
+          PU_1Y_MO=$(awk "BEGIN {printf \"%.2f\", $PU_1Y_TOT / 12}")
+          PU_3Y_TOT=$(calc_term_total "3_yr" "partial_upfront" 36)
+          PU_3Y_MO=$(awk "BEGIN {printf \"%.2f\", $PU_3Y_TOT / 36}")
 
-          # 5. All Upfront (1-Yr & 3-Yr)
-          AU_1Y_MO=$(calc_cost "1_yr" "all_upfront")
-          AU_1Y_TOT=$(awk "BEGIN {printf \"%.2f\", $AU_1Y_MO * 12}")
-          AU_3Y_MO=$(calc_cost "3_yr" "all_upfront")
-          AU_3Y_TOT=$(awk "BEGIN {printf \"%.2f\", $AU_3Y_MO * 36}")
+          # 4. All Upfront
+          AU_1Y_TOT=$(calc_term_total "1_yr" "all_upfront" 12)
+          AU_1Y_MO=$(awk "BEGIN {printf \"%.2f\", $AU_1Y_TOT / 12}")
+          AU_3Y_TOT=$(calc_term_total "3_yr" "all_upfront" 36)
+          AU_3Y_MO=$(awk "BEGIN {printf \"%.2f\", $AU_3Y_TOT / 36}")
 
           pct() {
             awk "BEGIN { if ($1 > 0) printf \"%.0f%%\", (($1 - $2) / $1) * 100; else print \"0%\" }"
           }
 
-          # 6. Complete Markdown Report Taiyar Karein
           cat <<EOF > /tmp/finops_report.md
           ### 💰 Complete AWS Cost & Savings Matrix (All Resources)
 
           #### 1. Baseline: On-Demand (No Commitment)
           | Plan | Monthly Cost | 1-Year Total (12 Mo) | 3-Year Total (36 Mo) |
           | :--- | :--- | :--- | :--- |
-          | **On-Demand** | **\$$(printf "%.2f" $OD_MO)** | \$$OD_1Y | \$$OD_3Y |
+          | **On-Demand** | **\$$OD_MO** | \$$OD_1Y | \$$OD_3Y |
 
           ---
 
           #### 2. Payment Option: \`no_upfront\` (Zero Upfront Payment)
           | Commitment Term | Effective Monthly | Total Term Cost | Total Savings vs On-Demand |
           | :--- | :--- | :--- | :--- |
-          | **1-Year Reserved** | \$$(printf "%.2f" $NU_1Y_MO)/mo | **\$$NU_1Y_TOT** (12 mo) | Save \$$(awk "BEGIN {printf \"%.2f\", $OD_1Y - $NU_1Y_TOT}") ($(pct $OD_1Y $NU_1Y_TOT)) |
-          | **3-Year Reserved** | \$$(printf "%.2f" $NU_3Y_MO)/mo | **\$$NU_3Y_TOT** (36 mo) | Save \$$(awk "BEGIN {printf \"%.2f\", $OD_3Y - $NU_3Y_TOT}") ($(pct $OD_3Y $NU_3Y_TOT)) |
+          | **1-Year Reserved** | \$$NU_1Y_MO/mo | **\$$NU_1Y_TOT** (12 mo) | Save \$$(awk "BEGIN {printf \"%.2f\", $OD_1Y - $NU_1Y_TOT}") ($(pct $OD_1Y $NU_1Y_TOT)) |
+          | **3-Year Reserved** | \$$NU_3Y_MO/mo | **\$$NU_3Y_TOT** (36 mo) | Save \$$(awk "BEGIN {printf \"%.2f\", $OD_3Y - $NU_3Y_TOT}") ($(pct $OD_3Y $NU_3Y_TOT)) |
 
           ---
 
           #### 3. Payment Option: \`partial_upfront\` (Part Upfront + Discounted Monthly)
           | Commitment Term | Effective Monthly | Total Term Cost | Total Savings vs On-Demand |
           | :--- | :--- | :--- | :--- |
-          | **1-Year Reserved** | \$$(printf "%.2f" $PU_1Y_MO)/mo | **\$$PU_1Y_TOT** (12 mo) | Save \$$(awk "BEGIN {printf \"%.2f\", $OD_1Y - $PU_1Y_TOT}") ($(pct $OD_1Y $PU_1Y_TOT)) |
-          | **3-Year Reserved** | \$$(printf "%.2f" $PU_3Y_MO)/mo | **\$$PU_3Y_TOT** (36 mo) | Save \$$(awk "BEGIN {printf \"%.2f\", $OD_3Y - $PU_3Y_TOT}") ($(pct $OD_3Y $PU_3Y_TOT)) |
+          | **1-Year Reserved** | \$$PU_1Y_MO/mo | **\$$PU_1Y_TOT** (12 mo) | Save \$$(awk "BEGIN {printf \"%.2f\", $OD_1Y - $PU_1Y_TOT}") ($(pct $OD_1Y $PU_1Y_TOT)) |
+          | **3-Year Reserved** | \$$PU_3Y_MO/mo | **\$$PU_3Y_TOT** (36 mo) | Save \$$(awk "BEGIN {printf \"%.2f\", $OD_3Y - $PU_3Y_TOT}") ($(pct $OD_3Y $PU_3Y_TOT)) |
 
           ---
 
           #### 4. Payment Option: \`all_upfront\` (Maximum Discount)
           | Commitment Term | Effective Monthly | Total Term Cost | Total Savings vs On-Demand |
           | :--- | :--- | :--- | :--- |
-          | **1-Year Reserved** | \$$(printf "%.2f" $AU_1Y_MO)/mo | **\$$AU_1Y_TOT** (12 mo) | Save \$$(awk "BEGIN {printf \"%.2f\", $OD_1Y - $AU_1Y_TOT}") ($(pct $OD_1Y $AU_1Y_TOT)) |
-          | **3-Year Reserved** | \$$(printf "%.2f" $AU_3Y_MO)/mo | **\$$AU_3Y_TOT** (36 mo) | Save \$$(awk "BEGIN {printf \"%.2f\", $OD_3Y - $AU_3Y_TOT}") ($(pct $OD_3Y $AU_3Y_TOT)) |
+          | **1-Year Reserved** | \$$AU_1Y_MO/mo | **\$$AU_1Y_TOT** (12 mo) | Save \$$(awk "BEGIN {printf \"%.2f\", $OD_1Y - $AU_1Y_TOT}") ($(pct $OD_1Y $AU_1Y_TOT)) |
+          | **3-Year Reserved** | \$$AU_3Y_MO/mo | **\$$AU_3Y_TOT** (36 mo) | Save \$$(awk "BEGIN {printf \"%.2f\", $OD_3Y - $AU_3Y_TOT}") ($(pct $OD_3Y $AU_3Y_TOT)) |
           EOF
 
-          # 7. Individual Resource-by-Resource Cost Table Append Karein
           infracost breakdown --path=plan.json --format=table > /tmp/resource_table.txt
           echo -e "\n---\n\n#### 5. Resource-by-Resource Breakdown (All AWS Services)\n\`\`\`text\n$(cat /tmp/resource_table.txt)\n\`\`\`" >> /tmp/finops_report.md
 
           cat /tmp/finops_report.md
 
-          # 8. Agar PR hai toh comment post karein
           if [ "${{ github.event_name }}" == "pull_request" ]; then
             gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/finops_report.md
           fi
