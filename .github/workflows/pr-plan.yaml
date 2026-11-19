@@ -1,66 +1,80 @@
+# Workflow ka naam jo GitHub Actions tab mein dikhega
 name: Terraform PR Plan & Cost Preview
 
+# 'on' batata hai ki yeh automation KAB chalega (Trigger)
 on:
-  workflow_dispatch:
-  
+  # Automatic Trigger: Jab koi 'main' branch mein code merge karne ke liye PR banaye
   pull_request:
     branches:
       - main
     paths:
-      - '**.tf'
+      - '**.tf'   # Sirf tab chale jab koi Terraform (.tf) file change hui ho
 
+# GitHub ko di jane wali suraksha anumati (Permissions)
 permissions:
-  id-token: write        # AWS OIDC Login ke liye
-  contents: read         # Code checkout ke liye
-  pull-requests: write   # PR par Plan aur Infracost comment post karne ke liye
+  id-token: write        # KYU: AWS mein bina password (OIDC se) securely login karne ke liye
+  contents: read         # KYU: Hamara Terraform code download (read) karne ke liye
+  pull-requests: write   # KYU: Pull Request par Plan aur Cost ka comment likhne ke liye
 
+# Yahan se asli kaam (Jobs) shuru hote hain
 jobs:
-  # ==========================================
-  # JOB 1: Level 1 Reusable Workflow (Format & Validate)
-  # ==========================================
+  # =====================================================================
+  # JOB 1: Reusable Workflow (Code ki galtiyan aur formatting check karna)
+  # =====================================================================
   call-format-validate:
+    # KYU: Baar-baar same code likhne se bachne ke liye hum doosri file ko yahan bula rahe hain
     uses: ./.github/workflows/code-check.yaml
 
-  # ==========================================
-  # JOB 2: AWS Login + Plan + PR Comment + Infracost with simple estimation
-  # ==========================================
+  # =====================================================================
+  # JOB 2: AWS Login + Terraform Plan + Cost Breakdown List
+  # =====================================================================
   terraform-plan:
-    needs: call-format-validate   # Job 1 pass hone ke baad hi chalega
-    runs-on: ubuntu-latest
+    needs: call-format-validate   # KYU: Jab tak Job 1 pass na ho, yeh job shuru nahi hoga
+    runs-on: ubuntu-latest        # KYU: GitHub ek fresh Ubuntu Linux machine dega kaam karne ke liye
 
     steps:
+      # Step 1: Repository ka code Ubuntu machine par laana
       - name: Code Checkout
         uses: actions/checkout@v4
 
+      # Step 2: Ubuntu machine par Terraform software install karna
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.12.2
-          terraform_wrapper: false
+          terraform_wrapper: false  # KYU: Plan output clean rakhne ke liye (extra logs hatata hai)
 
+      # Step 3: Secure tarike se AWS account mein login karna
       - name: Configure AWS Credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_IAM_ARN_DEVOPS }}
-          aws-region: us-east-1
+          role-to-assume: ${{ secrets.AWS_IAM_ARN_DEVOPS }}  # GitHub Secrets se AWS Role ka pata lena
+          aws-region: us-east-1                              # AWS ka region set karna
 
-      - name: Terraform Init (Remote S3 + DynamoDB)
+      # Step 4: Terraform ko ready karna (AWS plugins aur S3 state file connect karna)
+      - name: Terraform Init
         run: terraform init
 
+      # Step 5: Check karna ki AWS mein kya-kya banne ya badalne wala hai
       - name: Terraform Plan
-        id: plan
         run: |
+          # Plan chalakar insaano ke padhne layak text 'plan.txt' mein save karo
           terraform plan -no-color -out=tfplan.binary > plan.txt
+          # Usi plan ko machine (Infracost) ke padhne layak JSON format mein badlo
           terraform show -json tfplan.binary > plan.json
+          # GitHub Actions ke logs mein bhi plan print karke dikhao
           cat plan.txt
 
+      # Step 6: Terraform Plan ko PR par comment karna
       - name: Comment Plan on PR
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const plan = fs.readFileSync('plan.txt', 'utf8');
+            const plan = fs.readFileSync('plan.txt', 'utf8'); // plan.txt file ko padho
+            // GitHub comment ki limit ~65k hoti hai, isliye 60,000 characters tak kaat kar format karo
             const body = `### Terraform Plan Output 📋\n\`\`\`hcl\n${plan.slice(0, 60000)}\n\`\`\``;
+            // PR par comment post kar do
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
@@ -68,19 +82,30 @@ jobs:
               body: body
             });
 
+      # Step 7: Cost nikaalne wala tool (Infracost) install karna
       - name: Setup Infracost
         uses: infracost/actions/setup@v3
         with:
-          api-key: ${{ secrets.INFRACOST_API_KEY }}
+          api-key: ${{ secrets.INFRACOST_API_KEY }}  # Infracost ki API key GitHub Secrets se lena
 
-      - name: Generate Infracost Diff & Post PR Comment
+      # Step 8: Paid + Free Resources ki complete list nikaalna aur PR par comment karna
+      - name: Generate Cost Breakdown (Paid + Free) & Post PR Comment
         run: |
+          # 1. '--show-skipped' lagane se Paid ke saath-saath Free ($0) resources bhi JSON mein aayenge
           infracost breakdown --path=plan.json \
+            --show-skipped \
             --format=json \
             --out-file=/tmp/infracost.json
 
+          # 2. GitHub Actions ke logs mein bhi poori table (Paid + Free) dikhao
+          infracost output --path=/tmp/infracost.json \
+            --format=table \
+            --show-skipped
+
+          # 3. PR par sundar Cost Table (Paid + Free list + Total) comment post/update karo
           infracost comment github --path=/tmp/infracost.json \
             --repo=$GITHUB_REPOSITORY \
             --pull-request=${{ github.event.pull_request.number }} \
             --github-token=${{ secrets.GITHUB_TOKEN }} \
+            --show-all-projects \
             --behavior=update
