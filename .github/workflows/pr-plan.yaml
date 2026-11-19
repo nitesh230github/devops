@@ -67,6 +67,7 @@ jobs:
 
       # Step 6: Terraform Plan ko PR par comment karna
       - name: Comment Plan on PR
+        if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
