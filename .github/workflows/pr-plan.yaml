@@ -22,7 +22,7 @@ jobs:
     uses: ./.github/workflows/code-check.yaml
 
   # ==========================================
-  # JOB 2: AWS Login + Plan + PR Comment + Infracost
+  # JOB 2: AWS Login + Plan + PR Comment + Infracost with simple estimation
   # ==========================================
   terraform-plan:
     needs: call-format-validate   # Job 1 pass hone ke baad hi chalega
