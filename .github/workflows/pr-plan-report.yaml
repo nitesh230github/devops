@@ -2,12 +2,12 @@
 name: Terraform PR Plan & Cost Preview full report
 
 # 'on' batata hai ki yeh automation KAB chalega (Trigger)
-on:
+# on:
   # Automatic Trigger: Jab koi 'main' branch mein code merge karne ke liye PR banaye
   pull_request:
-    branches:
+  #  branches:
       - main
-    paths:
+   # paths:
       - '**.tf'   # Sirf tab chale jab koi Terraform (.tf) file change hui ho
 
 # GitHub ko di jane wali suraksha anumati (Permissions)
