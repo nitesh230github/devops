@@ -1,5 +1,5 @@
 # Workflow ka naam jo GitHub Actions tab mein dikhega
-name: Terraform PR Plan & Cost Preview
+name: Terraform PR Plan & Cost Preview full report
 
 # 'on' batata hai ki yeh automation KAB chalega (Trigger)
 on:
