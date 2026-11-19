@@ -1,0 +1,46 @@
+name: Terraform Automated Apply (Deploy to AWS)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '**.tf'
+
+permissions:
+  id-token: write        # AWS OIDC Login ke liye
+  contents: read         # Code checkout ke liye
+
+concurrency:
+  group: 'terraform-apply'
+  cancel-in-progress: true
+
+jobs:
+  call-format-validate:
+    uses: ./.github/workflows/code-check.yaml
+
+  terraform-apply:
+    needs: call-format-validate   # Job 1 pass hone ke baad hi chalega
+    runs-on: ubuntu-latest  
+
+    steps:
+      - name: Code Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.12.2
+          terraform_wrapper: false
+
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_IAM_ARN_DEVOPS }}
+          aws-region: us-east-1
+
+      - name: Terraform Init (Remote S3 + DynamoDB)
+        run: terraform init
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve -no-color
