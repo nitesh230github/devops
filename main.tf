@@ -68,7 +68,7 @@ resource "aws_security_group" "ec2_sg" {
 }
 
 # ------------------------------------------------------------------------------
-# 3. EC2 Instance (with Security Group Attached)
+# 3. EC2 Instance (with Security Group Attached) 
 # ------------------------------------------------------------------------------
 resource "aws_instance" "web" {
   ami                    = data.aws_ami.al2023.id
