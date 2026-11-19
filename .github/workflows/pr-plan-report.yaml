@@ -1,0 +1,154 @@
+# Workflow ka naam jo GitHub Actions tab mein dikhega
+name: Terraform PR Plan & Cost Preview full report
+
+# 'on' batata hai ki yeh automation KAB chalega (Trigger)
+# on:
+  # Automatic Trigger: Jab koi 'main' branch mein code merge karne ke liye PR banaye
+  pull_request:
+  #  branches:
+      - main
+   # paths:
+      - '**.tf'   # Sirf tab chale jab koi Terraform (.tf) file change hui ho
+
+# GitHub ko di jane wali suraksha anumati (Permissions)
+permissions:
+  id-token: write        # KYU: AWS mein bina password (OIDC se) securely login karne ke liye
+  contents: read         # KYU: Hamara Terraform code download (read) karne ke liye
+  pull-requests: write   # KYU: Pull Request par Plan aur Cost ka comment likhne ke liye
+
+# Yahan se asli kaam (Jobs) shuru hote hain
+jobs:
+  # =====================================================================
+  # JOB 1: Reusable Workflow (Code ki galtiyan aur formatting check karna)
+  # =====================================================================
+  call-format-validate:
+    # KYU: Baar-baar same code likhne se bachne ke liye hum doosri file ko yahan bula rahe hain
+    uses: ./.github/workflows/code-check.yaml
+
+  # =====================================================================
+  # JOB 2: AWS Login + Terraform Plan + Cost Breakdown List
+  # =====================================================================
+  terraform-plan:
+    needs: call-format-validate   # KYU: Jab tak Job 1 pass na ho, yeh job shuru nahi hoga
+    runs-on: ubuntu-latest        # KYU: GitHub ek fresh Ubuntu Linux machine dega kaam karne ke liye
+
+    steps:
+      # Step 1: Repository ka code Ubuntu machine par laana
+      - name: Code Checkout
+        uses: actions/checkout@v4
+
+      # Step 2: Ubuntu machine par Terraform software install karna
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.12.2
+          terraform_wrapper: false  # KYU: Plan output clean rakhne ke liye (extra logs hatata hai)
+
+      # Step 3: Secure tarike se AWS account mein login karna
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_IAM_ARN_DEVOPS }}  # GitHub Secrets se AWS Role ka pata lena
+          aws-region: us-east-1                              # AWS ka region set karna
+
+      # Step 4: Terraform ko ready karna (AWS plugins aur S3 state file connect karna)
+      - name: Terraform Init
+        run: terraform init
+
+      # Step 5: Check karna ki AWS mein kya-kya banne ya badalne wala hai
+      - name: Terraform Plan
+        run: |
+          # Plan chalakar insaano ke padhne layak text 'plan.txt' mein save karo
+          terraform plan -no-color -out=tfplan.binary > plan.txt
+          # Usi plan ko machine (Infracost) ke padhne layak JSON format mein badlo
+          terraform show -json tfplan.binary > plan.json
+          # GitHub Actions ke logs mein bhi plan print karke dikhao
+          cat plan.txt
+
+      # Step 6: Setup Infracost
+      - name: Setup Infracost
+        uses: infracost/actions/setup@v3
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      # Step 7: Cost Calculate + All Resources List (Create/Update/Delete + Paid/Free) PR Par Post Karein
+      - name: Generate Reviewer Summary (All Resources + Cost) & Post PR Comment
+        if: github.event_name == 'pull_request'
+        run: |
+          # 1. Infracost JSON generate karein (saare resources ke cost ke liye)
+          infracost breakdown --path=plan.json \
+            --show-skipped \
+            --format=json \
+            --out-file=/tmp/infracost.json
+
+          # 2. Terraform plan.json se Create, Update, Delete, Replace resources ki list nikalein
+          CREATE_LIST=$(jq -r '.resource_changes[]? | select(.change.actions == ["create"]) | .address' plan.json)
+          UPDATE_LIST=$(jq -r '.resource_changes[]? | select(.change.actions == ["update"]) | .address' plan.json)
+          DELETE_LIST=$(jq -r '.resource_changes[]? | select(.change.actions == ["delete"]) | .address' plan.json)
+          REPLACE_LIST=$(jq -r '.resource_changes[]? | select(.change.actions == ["delete","create"] or .change.actions == ["create","delete"]) | .address' plan.json)
+
+          # Helper function: Kisi bhi resource address ka exact monthly cost infracost.json se nikalne ke liye
+          get_cost() {
+            ADDR=$1
+            COST=$(jq -r --arg addr "$ADDR" '
+              [.projects[].breakdown.resources[]? | select(.name == $addr) | (.monthlyCost // "0") | tonumber] | add // 0
+            ' /tmp/infracost.json)
+            if [ "$COST" == "0" ] || [ "$COST" == "0.00" ] || [ -z "$COST" ]; then
+              echo "\$0.00 (Free)"
+            else
+              printf "\$%.2f / mo" "$COST"
+            fi
+          }
+
+          # 3. Markdown Table Build Karein
+          cat <<EOF > /tmp/pr_summary.md
+          ### 🔍 PR Infrastructure & Cost Review Summary
+
+          | Action | Resource Address | Estimated Monthly Cost |
+          | :--- | :--- | :--- |
+          EOF
+
+          COUNT_CREATE=0
+          for res in $CREATE_LIST; do
+            echo "| 🟢 **CREATE** | \`$res\` | $(get_cost "$res") |" >> /tmp/pr_summary.md
+            COUNT_CREATE=$((COUNT_CREATE + 1))
+          done
+
+          COUNT_UPDATE=0
+          for res in $UPDATE_LIST; do
+            echo "| 🟡 **UPDATE** | \`$res\` | $(get_cost "$res") |" >> /tmp/pr_summary.md
+            COUNT_UPDATE=$((COUNT_UPDATE + 1))
+          done
+
+          COUNT_REPLACE=0
+          for res in $REPLACE_LIST; do
+            echo "| 🔄 **REPLACE** | \`$res\` | $(get_cost "$res") |" >> /tmp/pr_summary.md
+            COUNT_REPLACE=$((COUNT_REPLACE + 1))
+          done
+
+          COUNT_DELETE=0
+          for res in $DELETE_LIST; do
+            echo "| 🔴 **DELETE** | \`$res\` | Removed |" >> /tmp/pr_summary.md
+            COUNT_DELETE=$((COUNT_DELETE + 1))
+          done
+
+          TOTAL_MONTHLY=$(jq -r '(.totalMonthlyCost // "0") | tonumber | . * 100 | round / 100' /tmp/infracost.json)
+
+          cat <<EOF >> /tmp/pr_summary.md
+
+          **📊 Quick Summary:** \`$COUNT_CREATE to create\` • \`$COUNT_UPDATE to update\` • \`$COUNT_REPLACE to replace\` • \`$COUNT_DELETE to destroy\`
+          **💰 Total Estimated Monthly Cost:** **\$$TOTAL_MONTHLY / month**
+
+          <details>
+          <summary><b>📋 Click to expand full Terraform Plan Output</b></summary>
+
+          \`\`\`hcl
+          $(head -c 55000 plan.txt)
+          \`\`\`
+          </details>
+          EOF
+
+          # 4. PR par comment post karein
+          gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/pr_summary.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
