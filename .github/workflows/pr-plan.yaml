@@ -65,90 +65,48 @@ jobs:
           # GitHub Actions ke logs mein bhi plan print karke dikhao
           cat plan.txt
 
-      # Step 6: Setup Infracost
+      # Step 6: Terraform Plan ko PR par comment karna
+      - name: Comment Plan on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('plan.txt', 'utf8'); // plan.txt file ko padho
+            // GitHub comment ki limit ~65k hoti hai, isliye 60,000 characters tak kaat kar format karo
+            const body = `### Terraform Plan Output 📋\n\`\`\`hcl\n${plan.slice(0, 60000)}\n\`\`\``;
+            // PR par comment post kar do
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+      # Step 7: Cost nikaalne wala tool (Infracost) install karna
       - name: Setup Infracost
         uses: infracost/actions/setup@v3
         with:
-          api-key: ${{ secrets.INFRACOST_API_KEY }}
+          api-key: ${{ secrets.INFRACOST_API_KEY }}  # Infracost ki API key GitHub Secrets se lena
 
-      # Step 7: Cost Calculate + All Resources List (Create/Update/Delete + Paid/Free) PR Par Post Karein
-      - name: Generate Reviewer Summary (All Resources + Cost) & Post PR Comment
-        if: github.event_name == 'pull_request'
+      # Step 8: Paid + Free Resources ki complete list nikaalna aur PR par comment karna
+      - name: Generate Cost Breakdown (Paid + Free) & Post PR Comment
         run: |
-          # 1. Infracost JSON generate karein (saare resources ke cost ke liye)
+          # 1. '--show-skipped' lagane se Paid ke saath-saath Free ($0) resources bhi JSON mein aayenge
           infracost breakdown --path=plan.json \
             --show-skipped \
             --format=json \
             --out-file=/tmp/infracost.json
 
-          # 2. Terraform plan.json se Create, Update, Delete, Replace resources ki list nikalein
-          CREATE_LIST=$(jq -r '.resource_changes[]? | select(.change.actions == ["create"]) | .address' plan.json)
-          UPDATE_LIST=$(jq -r '.resource_changes[]? | select(.change.actions == ["update"]) | .address' plan.json)
-          DELETE_LIST=$(jq -r '.resource_changes[]? | select(.change.actions == ["delete"]) | .address' plan.json)
-          REPLACE_LIST=$(jq -r '.resource_changes[]? | select(.change.actions == ["delete","create"] or .change.actions == ["create","delete"]) | .address' plan.json)
+          # 2. GitHub Actions ke logs mein bhi poori table (Paid + Free) dikhao
+          infracost output --path=/tmp/infracost.json \
+            --format=table \
+            --show-skipped
 
-          # Helper function: Kisi bhi resource address ka exact monthly cost infracost.json se nikalne ke liye
-          get_cost() {
-            ADDR=$1
-            COST=$(jq -r --arg addr "$ADDR" '
-              [.projects[].breakdown.resources[]? | select(.name == $addr) | (.monthlyCost // "0") | tonumber] | add // 0
-            ' /tmp/infracost.json)
-            if [ "$COST" == "0" ] || [ "$COST" == "0.00" ] || [ -z "$COST" ]; then
-              echo "\$0.00 (Free)"
-            else
-              printf "\$%.2f / mo" "$COST"
-            fi
-          }
-
-          # 3. Markdown Table Build Karein
-          cat <<EOF > /tmp/pr_summary.md
-          ### 🔍 PR Infrastructure & Cost Review Summary
-
-          | Action | Resource Address | Estimated Monthly Cost |
-          | :--- | :--- | :--- |
-          EOF
-
-          COUNT_CREATE=0
-          for res in $CREATE_LIST; do
-            echo "| 🟢 **CREATE** | \`$res\` | $(get_cost "$res") |" >> /tmp/pr_summary.md
-            COUNT_CREATE=$((COUNT_CREATE + 1))
-          done
-
-          COUNT_UPDATE=0
-          for res in $UPDATE_LIST; do
-            echo "| 🟡 **UPDATE** | \`$res\` | $(get_cost "$res") |" >> /tmp/pr_summary.md
-            COUNT_UPDATE=$((COUNT_UPDATE + 1))
-          done
-
-          COUNT_REPLACE=0
-          for res in $REPLACE_LIST; do
-            echo "| 🔄 **REPLACE** | \`$res\` | $(get_cost "$res") |" >> /tmp/pr_summary.md
-            COUNT_REPLACE=$((COUNT_REPLACE + 1))
-          done
-
-          COUNT_DELETE=0
-          for res in $DELETE_LIST; do
-            echo "| 🔴 **DELETE** | \`$res\` | Removed |" >> /tmp/pr_summary.md
-            COUNT_DELETE=$((COUNT_DELETE + 1))
-          done
-
-          TOTAL_MONTHLY=$(jq -r '(.totalMonthlyCost // "0") | tonumber | . * 100 | round / 100' /tmp/infracost.json)
-
-          cat <<EOF >> /tmp/pr_summary.md
-
-          **📊 Quick Summary:** \`$COUNT_CREATE to create\` • \`$COUNT_UPDATE to update\` • \`$COUNT_REPLACE to replace\` • \`$COUNT_DELETE to destroy\`
-          **💰 Total Estimated Monthly Cost:** **\$$TOTAL_MONTHLY / month**
-
-          <details>
-          <summary><b>📋 Click to expand full Terraform Plan Output</b></summary>
-
-          \`\`\`hcl
-          $(head -c 55000 plan.txt)
-          \`\`\`
-          </details>
-          EOF
-
-          # 4. PR par comment post karein
-          gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/pr_summary.md
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 3. PR par sundar Cost Table (Paid + Free list + Total) comment post/update karo
+          infracost comment github --path=/tmp/infracost.json \
+            --repo=$GITHUB_REPOSITORY \
+            --pull-request=${{ github.event.pull_request.number }} \
+            --github-token=${{ secrets.GITHUB_TOKEN }} \
+            --show-all-projects \
+            --behavior=update
