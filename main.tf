@@ -18,7 +18,7 @@ provider "aws" {
 }
 
 # ------------------------------------------------------------------------------
-# 1. Data Sources (Default VPC & Latest Amazon Linux 2023 AMI) new cost
+# 1. Data Sources (Default VPC & Latest Amazon Linux 2023 AMI) new cost estimation
 # ------------------------------------------------------------------------------
 data "aws_vpc" "default" {
   default = true
