@@ -35,7 +35,7 @@ data "aws_ami" "al2023" {
 }
 
 # ------------------------------------------------------------------------------
-# 2. Security Groups (EC2 & RDS)
+# 2. Security Groups (EC2 )
 # ------------------------------------------------------------------------------
 resource "aws_security_group" "ec2_sg" {
   name        = "ec2-app-sg"
@@ -60,27 +60,6 @@ resource "aws_security_group" "ec2_sg" {
 
   egress {
     description = "Allow all outbound traffic"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-resource "aws_security_group" "rds_sg" {
-  name        = "rds-db-sg"
-  description = "Allow database access only from EC2 Security Group"
-  vpc_id      = data.aws_vpc.default.id
-
-  ingress {
-    description     = "PostgreSQL from EC2"
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [aws_security_group.ec2_sg.id]
-  }
-
-  egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -123,23 +102,6 @@ resource "aws_s3_bucket_public_access_block" "app_bucket_access" {
 }
 
 # ------------------------------------------------------------------------------
-# 5. RDS Instance (PostgreSQL)
-# ------------------------------------------------------------------------------
-resource "aws_db_instance" "database" {
-  identifier             = "app-postgres-db"
-  engine                 = "postgres"
-  engine_version         = "16.3"
-  instance_class         = "db.t3.micro"
-  allocated_storage      = 20
-  db_name                = "appdb"
-  username               = "dbadmin"
-  password               = "ChangeMe12345!" # Use AWS Secrets Manager or variables in prod
-  vpc_security_group_ids = [aws_security_group.rds_sg.id]
-  publicly_accessible    = false
-  skip_final_snapshot    = true
-}
-
-# ------------------------------------------------------------------------------
 # 6. Outputs
 # ------------------------------------------------------------------------------
 output "ec2_public_ip" {
@@ -148,8 +110,4 @@ output "ec2_public_ip" {
 
 output "s3_bucket_name" {
   value = aws_s3_bucket.app_bucket.bucket
-}
-
-output "rds_endpoint" {
-  value = aws_db_instance.database.endpoint
 }
